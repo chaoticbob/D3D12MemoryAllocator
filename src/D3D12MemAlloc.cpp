@@ -37,6 +37,10 @@
 #include <cstdlib>
 #include <malloc.h> // for _aligned_malloc, _aligned_free
 
+#if ! defined(_MSC_VER)
+#include <shared_mutex>
+#endif
+
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -104,11 +108,19 @@ namespace D3D12MA
 
 static void* DefaultAllocate(size_t Size, size_t Alignment, void* /*pUserData*/)
 {
+#if defined(_MSC_VER)
     return _aligned_malloc(Size, Alignment);
+#else
+    return aligned_alloc(Alignment, Size);
+#endif
 }
 static void DefaultFree(void* pMemory, void* /*pUserData*/)
 {
+#if defined(_MSC_VER)
     return _aligned_free(pMemory);
+#else
+    return free(pMemory);
+#endif
 }
 
 static void* Malloc(const ALLOCATION_CALLBACKS& allocs, size_t size, size_t alignment)
@@ -214,11 +226,14 @@ static inline void D3D12MA_SWAP(T& a, T& b)
     #define D3D12MA_MUTEX Mutex
 #endif
 
+#if defined(_MSC_VER)
 #if !defined(_WIN32) || !defined(WINVER) || WINVER < 0x0600
     #error Required at least WinAPI version supporting: client = Windows Vista, server = Windows Server 2008.
 #endif
+#endif
 
 #ifndef D3D12MA_RW_MUTEX
+#if defined(_MSC_VER)
     class RWMutex
     {
     public:
@@ -230,6 +245,19 @@ static inline void D3D12MA_SWAP(T& a, T& b)
     private:
         SRWLOCK m_Lock;
     };
+#else
+    class RWMutex
+    {
+    public:
+        RWMutex() {}
+        void LockRead() { m_Mutex.lock_shared(); }
+        void UnlockRead() { m_Mutex.unlock_shared(); }
+        void LockWrite() { m_Mutex.lock(); }
+        void UnlockWrite() { m_Mutex.unlock(); }
+    private:
+        std::shared_timed_mutex m_Mutex;
+    };
+#endif
     #define D3D12MA_RW_MUTEX RWMutex
 #endif
 
@@ -4096,7 +4124,11 @@ AllocatorPimpl::AllocatorPimpl(const ALLOCATION_CALLBACKS& allocationCallbacks, 
 HRESULT AllocatorPimpl::Init(const ALLOCATOR_DESC& desc)
 {
 #if D3D12MA_DXGI_1_4
+#if defined(_MSC_VER)
     desc.pAdapter->QueryInterface<IDXGIAdapter3>(&m_Adapter3);
+#else
+    desc.pAdapter->QueryInterface(__uuidof(IDXGIAdapter3), reinterpret_cast<void**>(&m_Adapter3));
+#endif
 #endif
 
     HRESULT hr = m_Adapter->GetDesc(&m_AdapterDesc);
